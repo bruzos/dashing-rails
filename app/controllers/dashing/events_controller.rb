@@ -8,19 +8,22 @@ module Dashing
       response.headers['Content-Type']      = 'text/event-stream'
       response.headers['X-Accel-Buffering'] = 'no'
       response.stream.write latest_events
-
-      @redis.with do |redis_connection|
-        redis_connection.psubscribe("#{Dashing.config.redis_namespace}.*") do |on|
-          on.pmessage do |pattern, event, data|
-            response.stream.write("data: #{data}\n\n")
+      
+      begin        
+        @redis.with do |redis_connection|
+          redis_connection.psubscribe("#{Dashing.config.redis_namespace}.*") do |on|
+            on.pmessage do |pattern, event, data|
+              response.stream.write("data: #{data}\n\n")
+            end
           end
         end
+      rescue IOError, ActionController::Live::ClientDisconnected
+        logger.info "[Dashing][#{Time.now.utc.to_s}] Stream closed"
+        @redis.shutdown { |redis_connection| redis_connection.quit }
+      ensure
+        # @redis.shutdown { |redis_connection| redis_connection.quit }
+        response.stream.close
       end
-    rescue IOError
-      logger.info "[Dashing][#{Time.now.utc.to_s}] Stream closed"
-    ensure
-      #@redis.shutdown { |redis_connection| redis_connection.quit }
-      response.stream.close
     end
 
     def latest_events
